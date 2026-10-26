@@ -1,0 +1,227 @@
+= 01 — Data model of the booking app
+:toc: macro
+:status: approved
+
+toc::[]
+
+== Goal
+
+Describe the persistent data model of the meeting-room and desk booking app (office
+hoteling): where things are (building → floor → room/desk), what rooms offer
+(amenities) and who booked what and when (booking with a status).
+
+This step delivers entities, one enum, message keys and the database schema. Nothing
+else: no screens, no roles, no booking rules.
+
+== Scope
+
+=== In scope
+
+* JPA entities: `Building`, `Floor`, `Room`, `Desk`, `Amenity`, `Booking`.
+* Enum `BookingStatus`.
+* Composition `Building` → `Floor` → `Room` + `Desk`.
+* Many-to-many `Room` ↔ `Amenity`.
+* Message keys (`en`) for entity names, attributes and enum constants.
+* Liquibase changelog for all of the above. *Generated in Jmix Studio by you*, not
+  written by me (see CLAUDE.md). I review it against the entities.
+
+=== Out of scope
+
+* Screens: list/detail views, menu items (next spec, generated in Studio).
+* Security: resource roles, row-level roles, role assignments (`02_security`).
+* Slot check: overlapping bookings of the same room/desk, working hours, max
+  duration, booking in the past. The model does not prevent overlaps.
+* Booking invariants: "exactly one of room / desk" and `startTime < endTime` are
+  not enforced in this step (left for the slot-check spec).
+* Business logic around status: transitions, auto-completion, cancellation rules.
+* Capacity check (attendees vs room capacity), attendees list.
+* Seed / demo data.
+* Photos, floor plans and other files (`03_files`).
+* Soft delete and audit fields (created by / modified by).
+
+== Model
+
+[source]
+----
+Building 1 ──< Floor 1 ──< Room >──< Amenity
+                     1 ──< Desk
+
+User 1 ──< Booking >── 0..1 Room
+                   >── 0..1 Desk
+----
+
+Common to every entity: `UUID id` with `@JmixGeneratedValue`, `@Version Integer version`,
+hand-written getters/setters (as in `User`), all references `FetchType.LAZY`.
+
+=== Building
+
+Table `BUILDING`. Instance name: `name`.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|name |String(100) |yes |unique (`IDX_BUILDING_ON_NAME`)
+|address |String(255) |no |
+|floors |List<Floor> |— |`@Composition`, `mappedBy = "building"`
+|===
+
+=== Floor
+
+Table `FLOOR`. Instance name: `name`.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|building |Building |yes |back reference, column `BUILDING_ID`
+|number |Integer |yes |column `FLOOR_NUMBER`; may be 0 or negative (ground floor, basement)
+|name |String(100) |yes |e.g. "3rd floor, east wing"
+|rooms |List<Room> |— |`@Composition`, `mappedBy = "floor"`
+|desks |List<Desk> |— |`@Composition`, `mappedBy = "floor"`
+|===
+
+Unique: (`BUILDING_ID`, `FLOOR_NUMBER`) — constraint `UK_FLOOR_BUILDING_NUMBER`.
+
+=== Room
+
+Table `ROOM`. Instance name: `name`.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|floor |Floor |yes |back reference, column `FLOOR_ID`
+|name |String(100) |yes |
+|capacity |Integer |yes |`@Positive` (at least 1 seat)
+|amenities |List<Amenity> |no |`@ManyToMany`, join table `ROOM_AMENITY_LINK` (`ROOM_ID`, `AMENITY_ID`); `Room` is the owning side
+|===
+
+Unique: (`FLOOR_ID`, `NAME`) — constraint `UK_ROOM_FLOOR_NAME`.
+
+=== Desk
+
+Table `DESK`. Instance name: `code`.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|floor |Floor |yes |back reference, column `FLOOR_ID`
+|code |String(50) |yes |e.g. "3-E-12"
+|===
+
+Unique: (`FLOOR_ID`, `CODE`) — constraint `UK_DESK_FLOOR_CODE`.
+
+=== Amenity
+
+Table `AMENITY`. Instance name: `name`. Reference data, not part of the composition.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|name |String(100) |yes |unique (`IDX_AMENITY_ON_NAME`); e.g. "Projector", "Whiteboard"
+|description |String(255) |no |
+|===
+
+No back reference to `Room` (the link is navigated from the room side only).
+
+=== Booking
+
+Table `BOOKING`. Instance name: method over `startTime` and the room/desk —
+exact format decided at implementation, with `@DependsOnProperties`.
+
+[cols="2,2,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|user |User |yes |*who*; column `USER_ID` → `USER_`
+|room |Room |no |*what* — room or desk (invariant not enforced yet)
+|desk |Desk |no |*what*
+|startTime |OffsetDateTime |yes |*when*; column `START_TIME`
+|endTime |OffsetDateTime |yes |*when*; column `END_TIME` (`END` is reserved in PostgreSQL)
+|status |BookingStatus |yes |column `STATUS`, `String(50)`; default `CONFIRMED` set by field initializer, so `DataManager.create()` + `save()` works without touching it
+|purpose |String(255) |no |meeting title / note
+|===
+
+=== BookingStatus
+
+`EnumClass<String>`, ids are stable literals equal to the constant names:
+
+[cols="2,2,4"]
+|===
+|Constant |Id |Meaning
+
+|CONFIRMED |`CONFIRMED` |active booking (default)
+|CANCELLED |`CANCELLED` |cancelled by the user or an admin
+|COMPLETED |`COMPLETED` |the slot has passed
+|===
+
+Transitions between statuses are not enforced in this step.
+
+== Delete behaviour
+
+No soft delete, so Jmix `@OnDelete` policies do not run; rules live in foreign keys
+(the Studio changelog must reproduce them).
+
+* Building → Floor → Room/Desk: cascade. Child FK `onDelete="CASCADE"`, child reference
+  carries `@OnDeleteInverse(DeletePolicy.CASCADE)` as a hint for Studio.
+* Booking → Room / Desk / User: deny. Plain FK; deleting a room, desk or user that has
+  bookings fails with a database error. Consequence: a building/floor with booked
+  rooms or desks cannot be deleted either.
+* Room ↔ Amenity: link rows go away with the room — FK `ROOM_AMENITY_LINK.ROOM_ID`
+  has `onDelete="CASCADE"` (needed because a room deleted by the floor cascade bypasses
+  JPA). Deleting an amenity still linked to rooms is denied: plain FK on `AMENITY_ID`.
+
+== Indexes
+
+Every FK column gets an index; each index is declared both in `@Table(indexes = …)`
+and in the changelog with the same name (`IDX_FLOOR_BUILDING`, `IDX_ROOM_FLOOR`,
+`IDX_DESK_FLOOR`, `IDX_BOOKING_USER`, `IDX_BOOKING_ROOM`, `IDX_BOOKING_DESK`), plus the
+unique ones listed above. Additionally `IDX_BOOKING_START_TIME` on `START_TIME` —
+future slot checks and lists will filter by time.
+
+== Who does what
+
+[cols="3,2"]
+|===
+|Artifact |Done by
+
+|Entities and enum (`com.company.booking.entity`) |me
+|Message keys in `messages_en.properties` |me
+|Liquibase changelog `020-data-model.xml` |you, in Jmix Studio; I review it against this spec
+|Gate 1 (API + static checks on my files) |me
+|Gate 2 (`./gradlew clean test`, foreground) |me, after your changelog is in place
+|===
+
+Tests: no new tests in this step — the model has no business rules yet. The only
+non-trivial behaviour (cascade / deny on delete) is in the FKs and checked by
+reviewing the changelog. If you want it pinned by an integration test, say so.
+
+== Acceptance criteria
+
+. The six entities and `BookingStatus` exist in `com.company.booking.entity` with the
+  attributes, types, lengths and required flags from this spec.
+. Every required reference has both `optional = false` and `@JoinColumn(nullable = false)`;
+  composition children have a non-null back reference.
+. `@Composition` on `Building.floors`, `Floor.rooms`, `Floor.desks`.
+. `Room.amenities` is a `@ManyToMany` through `ROOM_AMENITY_LINK`.
+. `Booking.status` is stored as a string id and defaults to `CONFIRMED` for an entity
+  created by `DataManager.create()`.
+. Unique constraints and indexes from this spec are present in both the entities and
+  the changelog with the same names.
+. FKs in the changelog: cascade on the composition chain, no `onDelete` on booking
+  references.
+. Every entity, attribute and enum constant has a caption in `messages_en.properties`
+  (no raw keys in the UI later).
+. Gate 1: no errors from JetBrains inspections on every file I wrote.
+. Gate 2: `./gradlew clean test` is green — the context boots and Liquibase applies the
+  changelog to a fresh HSQLDB.
+
+== Decisions
+
+. Time type: `OffsetDateTime`.
+. Room/desk and start/end invariants: not now.
+. Deleting an amenity in use: denied by the FK.
+. Statuses: `CONFIRMED / CANCELLED / COMPLETED`.
