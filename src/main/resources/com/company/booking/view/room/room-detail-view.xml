@@ -26,7 +26,7 @@
                 <responsiveStep minWidth="40em" columns="2"/>
             </responsiveSteps>
             <textField id="nameField" property="name"/>
-            <textField id="capacityField" property="capacity"/>
+            <integerField id="capacityField" property="capacity"/>
         </formLayout>
         <h4 text="msg://com.company.booking.entity/Room.amenities"/>
         <hbox id="amenitiesButtonsPanel" wrap="true" width="100%">

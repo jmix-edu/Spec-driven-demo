@@ -1,0 +1,202 @@
+= 03 — Booking check service (slot conflicts)
+:toc: macro
+:status: approved
+
+toc::[]
+
+== Goal
+
+A booking that is inconsistent or collides with another booking of the same place must
+not be saved, whatever path saves it: the booking screen, a service, a test, a future
+REST call. The rules live in one `@Service`; saving a `Booking` calls it and rejects the
+save with a clear message.
+
+== Rules
+
+For the booking being saved (`b`):
+
+[cols="1,4,4"]
+|===
+|# |Rule |Notes
+
+|R1
+|`b.endTime` is after `b.startTime`.
+|Strict: equal start and end is rejected. Both are required by the entity already.
+
+|R2
+|Exactly one of `b.room` / `b.desk` is set.
+|Neither and both are rejected.
+
+|R3
+|No other booking `o` of the same place with `o.status != CANCELLED` overlaps
+ `[b.startTime, b.endTime)`.
+|"Same place": `o.room = b.room` if `b` books a room, `o.desk = b.desk` if it books a
+ desk. A room and a desk never conflict with each other.
+|===
+
+Details of R3:
+
+* Overlap of half-open intervals: `o.startTime < b.endTime and o.endTime > b.startTime`.
+  Back-to-back bookings (10:00–11:00 and 11:00–12:00) do *not* conflict.
+* "Other": `o.id <> b.id`, so re-saving an existing booking does not conflict with
+  itself.
+* `CONFIRMED` and `COMPLETED` bookings occupy the slot; `CANCELLED` ones do not.
+* If `b` itself is `CANCELLED`, R3 is skipped: a cancelled booking occupies nothing,
+  and cancelling must always be possible. R1 and R2 still apply.
+* Times are compared as instants (`OffsetDateTime`, `timestamp with time zone`), so
+  bookings entered with different offsets are compared correctly.
+* R3 is checked only when R1 and R2 passed: the "same place" is undefined without R2,
+  and an empty or inverted interval has no meaningful overlap.
+
+== Design
+
+=== BookingValidationService
+
+`com.company.booking.service.BookingValidationService`, a Spring `@Service` with
+constructor-injected `DataManager` and `Messages`. No UI classes.
+
+[source,java]
+----
+public List<String> validate(Booking booking)   // empty list = valid
+----
+
+* Returns all violated rules as localized messages, in rule order (R1, R2, R3), so the
+  user sees every problem at once.
+* R3 runs one query for the conflicting booking with the earliest start (if any), so the
+  message can name it; nothing is loaded when there is no conflict.
+* Does not modify or save anything.
+
+=== Enforcement on save — two call sites, one rule set
+
+[cols="2,3,3"]
+|===
+|Where |What |Why
+
+|`BookingSavingListener` (`com.company.booking.listener`), `@EventListener` on
+ `EntitySavingEvent<Booking>`
+|Calls `validate`; if the list is not empty, throws `BookingValidationException`
+ (unchecked, in `service`) with the messages joined. The save is rejected and the
+ transaction rolls back.
+|Covers *every* save path: `DataManager`, services, tests, future REST.
+
+|`Booking.detail`, `@Subscribe` on the view's `ValidationEvent`
+|Calls `validate` and adds each message to the validation errors.
+|Clear UX: the standard validation dialog lists the problems, the form stays open with
+ the data, no exception dialog. Thin: one call, no rules in the view.
+|===
+
+The UI path is checked twice (view, then listener); that is one extra query per save
+and keeps the listener as the guarantee. If two users save conflicting bookings at the
+same moment, the listener rejects the second one with the generic error dialog (see
+"Out of scope" on concurrency).
+
+Reading references: inside `EntitySavingEvent` an unfetched reference throws instead of
+lazy-loading. The service checks `EntityStates.isLoaded` for `room` and `desk`; if
+either is not loaded, it reads both from a separately loaded copy by id (with
+`_instance_name`) and still validates the given booking's own times and status, never
+the copy's (toolkit rule, `jmix-add-entity-event-listener`). This keeps both callers a
+single `validate(booking)` call.
+
+=== Messages
+
+In `messages_en.properties`, group `com.company.booking.service`:
+
+[cols="2,4"]
+|===
+|Key |Text
+
+|`bookingValidation.endBeforeStart` |End must be after start.
+|`bookingValidation.placeMissing` |Choose a room or a desk.
+|`bookingValidation.placeBoth` |Choose either a room or a desk, not both.
+|`bookingValidation.roomTaken` |Room %s is already booked from %s to %s.
+|`bookingValidation.deskTaken` |Desk %s is already booked from %s to %s.
+|===
+
+The `%s` placeholders: the room name / desk code, then the conflicting booking's start
+and end. Times formatted with the `Booking` attribute datatype via `DatatypeFormatter`
+(exact formatting call verified at implementation).
+
+== Tests
+
+Business rules → integration tests (CLAUDE.md). `@SpringBootTest` with the project's
+admin authentication, data created through `DataManager`, cleanup by reload-then-remove
+in `@AfterEach` (bookings before rooms/desks before floors/buildings), unique names per
+run.
+
+`BookingValidationTest` — through `DataManager.save()` (proves the listener) unless
+stated:
+
+. R1: end before start → rejected; end equal to start → rejected.
+. R2: neither room nor desk → rejected; both → rejected.
+. R3 room: overlapping confirmed booking of the same room → rejected, message names the
+  room.
+. R3 back-to-back: 10–11 and 11–12 same room → both saved.
+. R3 cancelled: overlapping booking that is `CANCELLED` → new one saved.
+. R3 completed: overlapping `COMPLETED` booking → rejected.
+. R3 other place: same time, different room → saved; room and desk on the same floor at
+  the same time → both saved.
+. R3 desk: overlapping booking of the same desk → rejected.
+. Self: load a saved booking, change `purpose`, save → saved.
+. Cancelling: a booking set to `CANCELLED` is saved even if it overlaps another active
+  one.
+. Service directly: a booking violating R1 and R2 → `validate` returns both messages,
+  nothing persisted.
+
+No UI test for the `ValidationEvent` hook — it is one call, checked in the browser
+(Gate 3 checklist).
+
+== Scope
+
+=== In scope
+
+* R1–R3, the service, the saving listener, the detail-view hook, message keys, the tests
+  above.
+
+=== Out of scope
+
+* Concurrency: no locking, no database exclusion constraint. Two simultaneous
+  conflicting saves can both pass the check; closing that gap is a later spec
+  (`04_deployment`, PostgreSQL).
+* Other booking rules: working hours, minimum/maximum duration, bookings in the past,
+  room capacity, how far ahead one may book, one booking per user at a time.
+* Status transitions and auto-completion of past bookings.
+* Showing free slots, a calendar, suggestions for an alternative room.
+* Security: who may book or see whose bookings (`02_security`).
+* Re-checking existing data: bookings already in the database are not re-validated.
+* Localization beyond `en`.
+
+== Who does what
+
+Everything in this spec is hand-written code — no Studio scaffolding involved: service,
+exception, listener, the `ValidationEvent` handler in `BookingDetailView`, message keys,
+tests. Me.
+
+== Acceptance criteria
+
+. `BookingValidationService` is a `@Service` using `DataManager`, with no Vaadin/Jmix UI
+  imports.
+. `DataManager.save()` of a booking violating R1, R2 or R3 throws
+  `BookingValidationException` and nothing is persisted.
+. Back-to-back, cancelled, other-place and self-update cases are saved.
+. In the booking screen a violating booking is not saved; the validation dialog shows
+  the message(s) from the table above; the form stays open.
+. All tests from "Tests" pass, and pass again on a second back-to-back run.
+. Gate 1: compile + inspection on every Java file; mechanical checks on
+  `booking-detail-view.xml` if touched.
+. Gate 2: `./gradlew --no-daemon clean test` green, new tests counted in the result.
+
+=== Browser checklist (Gate 3)
+
+. Create a booking for a room 10:00–11:00 → saved.
+. Another booking for the same room 10:30–11:30 → dialog: "Room … is already booked from
+  10:00 to 11:00", form stays open; change to 11:00–12:00 → saved.
+. Booking with end before start → "End must be after start."
+. Booking with both room and desk → "Choose either a room or a desk, not both."; with
+  neither → "Choose a room or a desk."
+. Cancel the 10:00–11:00 booking (status Cancelled) → now 10:30–11:30 for that room saves.
+
+== Decisions
+
+. UI path: both call sites — saving listener as the guarantee, `ValidationEvent` in
+  `Booking.detail` for the dialog.
+. A booking whose own status is `CANCELLED` skips R3.

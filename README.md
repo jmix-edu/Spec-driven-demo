@@ -31,4 +31,36 @@ The default user credentials are:
 * Login: `admin`
 * Password: `admin`
 
-**WARNING**: Change admin password and remove `ui.login.defaultUsername` and `ui.login.defaultPassword` application properties when deploying the application to production.
+Without an active profile the application runs in the `dev` profile: embedded HSQLDB, demo data
+(building, rooms, users `emma`, `oliver`, `maria` with password = username) and a prefilled login form.
+The AI chat needs the `OPENROUTER_API_KEY` environment variable.
+
+## Deployment
+
+The `prod` profile takes everything environment-specific from environment variables
+(`DB_URL`, `DB_USER`, `DB_PASSWORD`, `OPENROUTER_API_KEY`), uses PostgreSQL, logs less and creates
+no demo data.
+
+1. Build the production JAR on the host (Studio's `productionMode = false` in `build.gradle` stays):
+
+   ```bash
+   ./gradlew -Pvaadin.productionMode=true bootJar
+   ```
+
+2. Copy `.env.example` to `.env` (git-ignored) and fill in real values.
+3. Start PostgreSQL and the application:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. Open <http://localhost:8080>, log in as `admin` / `admin` and **change the admin password at once** -
+   every new database starts with this account.
+5. As admin, re-apply the Dynamic Model definition (`specs/05_addons/02-catering-dynamic-model.yaml`):
+   the model is stored in the database.
+
+Stop with `docker compose down`; the data stays in the `booking-db-data` volume. Do not run
+`docker compose config` - it prints the secrets.
+
+The application is packaged as an executable JAR with an embedded server. A WAR is only needed to deploy
+into an existing external servlet container; this project does not build one.

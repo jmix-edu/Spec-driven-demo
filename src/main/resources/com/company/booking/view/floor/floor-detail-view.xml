@@ -27,9 +27,18 @@
                 <responsiveStep minWidth="0" columns="1"/>
                 <responsiveStep minWidth="40em" columns="2"/>
             </responsiveSteps>
-            <textField id="numberField" property="number"/>
+            <integerField id="numberField" property="number"/>
             <textField id="nameField" property="name"/>
+            <fileStorageUploadField id="planField" property="plan" colspan="2"
+                                    acceptedFileTypes="image/png,image/jpeg,.png,.jpg,.jpeg"
+                                    maxFileSize="10485760"
+                                    fileTooBigText="msg://planField.fileTooBig"
+                                    incorrectFileTypeText="msg://planField.incorrectFileType"
+                                    clearButtonVisible="true"/>
         </formLayout>
+        <image id="planPreview" dataContainer="floorDc" property="plan"
+               alternateText="msg://planPreview.alternateText"
+               maxWidth="100%" maxHeight="20rem"/>
         <h4 text="msg://com.company.booking.entity/Floor.rooms"/>
         <hbox id="roomsButtonsPanel" wrap="true" width="100%">
             <button action="roomsDataGrid.createAction"/>

@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <view xmlns="http://jmix.io/schema/flowui/view"
       xmlns:c="http://jmix.io/schema/flowui/jpql-condition"
-      title="msg://roomLoolkupView.title"
+      title="msg://roomLookupView.title"
       focusComponent="roomsDataGrid">
     <data>
         <collection id="roomsDc"
                     class="com.company.booking.entity.Room">
-            <fetchPlan extends="_base"/>
+            <fetchPlan extends="_base">
+                <property name="floor" fetchPlan="_instance_name">
+                    <property name="building" fetchPlan="_instance_name"/>
+                </property>
+            </fetchPlan>
             <loader id="roomsDl" readOnly="true">
                 <query>
-                    <![CDATA[select e from Room e]]>
+                    <![CDATA[select e from Room e
+                    order by e.floor.building.name, e.floor.number, e.name]]>
                 </query>
             </loader>
         </collection>
@@ -47,6 +52,8 @@
             <columns resizable="true">
                 <column property="name"/>
                 <column property="capacity"/>
+                <column property="floor"/>
+                <column property="floor.building"/>
             </columns>
         </dataGrid>
         <hbox id="lookupActions" visible="false">

@@ -1,0 +1,73 @@
+= 05 Add-ons: prompts
+
+The prompts used in this lesson, in order, cleaned up so they can be replayed as-is.
+Dead ends from the original session are left out. Where a prompt was changed to avoid
+one, the note under it says why.
+
+== 1. AI Tools via OpenRouter
+
+=== 1.1 Spec
+
+[source,text]
+----
+Write a spec: add the AI Tools add-on, model z-ai/glm-5.2 through OpenRouter (OpenAI-
+compatible API), the key from the OPENROUTER_API_KEY variable. Local run only: don't touch
+production settings, compose or deployment, that is Lesson 4. Employees and office managers
+get the chat. Spec only, no code.
+----
+
+Result: the spec. It is read from the add-on jars, not from memory: the add-on ships no
+model provider, its chat role is `aitools-chat-user`, and its data-load feature runs the
+model's queries with the user's rights.
+
+=== 1.2 Install and implementation
+
+Install the add-on through Studio's Marketplace first, then:
+
+[source,text]
+----
+1 - installed by me, 2 - the chat may query data (with access rules), 3 - the model
+supports tool calling. Implement.
+----
+
+Result: the Spring AI OpenAI starter, the OpenRouter properties, a placeholder key for
+tests, the persona roles extending `AiToolsChatUserRole`, `User` excluded from data-load,
+and `AiChatDataAccessTest`.
+
+NOTE: Spring AI 2.0 differs from 1.x. The base URL includes `/v1`
+(`https://openrouter.ai/api/v1`) and the model property is `spring.ai.openai.chat.model`.
+Both were read from the resolved jars. A data-access test must request result columns the
+user may view: the add-on drops columns without attribute access.
+
+== 2. Catering orders with Dynamic Model
+
+=== 2.1 Spec
+
+Install the Dynamic Model add-on through Studio, then:
+
+[source,text]
+----
+Write a spec: through Dynamic Model, no application code, add a dynamic entity "Catering
+order" for a booking: booking, number of persons, menu, comment. List and detail views, a
+menu item. Employees read and create, office managers do everything. The result is the
+model YAML that I will paste into the Dynamic Model editor; put it next to the spec. Check
+that the add-on's own changelog is included in the root changelog. Write the spec, wait for
+my decisions.
+----
+
+NOTE: The last-but-one sentence was added after the original session. The Studio install
+did not include `/io/jmix/dynmodel/liquibase/changelog.xml`, so the table that stores the
+model was never created.
+
+=== 2.2 Decisions and the YAML
+
+[source,text]
+----
+1 - menu is a list (Coffee break, Breakfast, Lunch, Buffet); 2 - accept that employees see
+all catering orders; 3 - the changelog include is added; 4 - persons at most 50.
+----
+
+Result: `02-catering-dynamic-model.yaml`. Gate 1 is a throwaway check that parses it with
+the add-on's own model classes, and the check is first shown to fail on a broken copy.
+Every attribute grants view and modify explicitly: without that, the create form is empty
+for non-admins.

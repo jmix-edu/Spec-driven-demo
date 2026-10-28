@@ -1,0 +1,98 @@
+# Catering orders - Dynamic Model definition (spec 05_addons/02-catering-dynamic-model.spec.adoc).
+# Paste into Dynamic model -> editor as admin and apply. The applied model lives in the database
+# (DYNMOD_SETTINGS); this file is the source to re-apply after the database is recreated.
+#
+# Access is declared here by role code. An attribute without its own resourceRoles grants nothing
+# to non-admin roles, so every attribute lists view and modify explicitly.
+model:
+  enumerations:
+    - name: CateringMenu
+      messages:
+        en: Catering menu
+      values:
+        - name: COFFEE_BREAK
+          id: COFFEE_BREAK
+          messages:
+            en: Coffee break
+        - name: BREAKFAST
+          id: BREAKFAST
+          messages:
+            en: Breakfast
+        - name: LUNCH
+          id: LUNCH
+          messages:
+            en: Lunch
+        - name: BUFFET
+          id: BUFFET
+          messages:
+            en: Buffet
+  entities:
+    - name: CateringOrder
+      messages:
+        en: Catering order
+      attributes:
+        - name: booking
+          entityName: Booking
+          required: true
+          resourceRoles:
+            view: [booking-employee, booking-office-manager]
+            modify: [booking-employee, booking-office-manager]
+          messages:
+            en: Booking
+        - name: persons
+          javaClass: java.lang.Integer
+          required: true
+          validation:
+            constraints:
+              - annotation: Positive
+              - annotation: Max
+                parameters:
+                  value: 50
+          resourceRoles:
+            view: [booking-employee, booking-office-manager]
+            modify: [booking-employee, booking-office-manager]
+          messages:
+            en: Persons
+        - name: menu
+          enumeration: CateringMenu
+          required: true
+          instanceName: true
+          resourceRoles:
+            view: [booking-employee, booking-office-manager]
+            modify: [booking-employee, booking-office-manager]
+          messages:
+            en: Menu
+        - name: comment
+          javaClass: java.lang.String
+          length: 1000
+          resourceRoles:
+            view: [booking-employee, booking-office-manager]
+            modify: [booking-employee, booking-office-manager]
+          messages:
+            en: Comment
+      views:
+        - type: list
+          viewTitle:
+            en: Catering orders
+          resourceRoles: [booking-employee, booking-office-manager]
+          menuItem:
+            parentMenu: application
+            # after Bookings, before Users in menu.xml
+            insertBefore: User.list
+            title:
+              en: Catering orders
+            resourceRoles: [booking-employee, booking-office-manager]
+          descriptor:
+            template: default
+        - type: detail
+          viewTitle:
+            en: Catering order
+          resourceRoles: [booking-employee, booking-office-manager]
+          descriptor:
+            template: default
+      # employees read and create; office managers do everything; system-full-access is implicit
+      resourceRoles:
+        read: [booking-employee, booking-office-manager]
+        create: [booking-employee, booking-office-manager]
+        update: [booking-office-manager]
+        delete: [booking-office-manager]

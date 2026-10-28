@@ -1,0 +1,40 @@
+= 03 Files: prompts
+
+The prompts used in this lesson, in order, cleaned up so they can be replayed as-is.
+
+== 1. Floor plans
+
+=== 1.1 Spec
+
+[source,text]
+----
+Write a spec specs/03_files/01-floor-plan.spec.adoc: each floor has a plan (an image)
+that the office manager uploads in the floor form; the employee sees the plan of the chosen
+room's or desk's floor right in the booking form, with a download button. PNG and JPEG only,
+up to 10 MB. Where the files live in dev - also into the spec. Roles and the container are
+not part of this step.
+----
+
+Result: the spec, with the storage location read from the Jmix defaults:
+`<project root>/.jmix/work/filestorage/<yyyy>/<MM>/<dd>/<uuid>.<ext>`.
+
+=== 1.2 Decisions and implementation
+
+[source,text]
+----
+1 - the 10 MB limit on the upload field only; 2 - check the file name, not the content;
+3 - keep the preview in the floor form. Implement.
+----
+
+Result: `Floor.plan` (`FileRef`), the upload field and preview, a saving listener for the
+PNG/JPEG rule with `FloorPlanValidationTest`, and the floor-plan section with download in
+the booking form.
+
+=== 1.3 Changelog and Gate 2
+
+Generate the changelog in Studio first (`addColumn PLAN` on `FLOOR`), then:
+
+[source,text]
+----
+The changelog is generated. Review it and run Gate 2.
+----

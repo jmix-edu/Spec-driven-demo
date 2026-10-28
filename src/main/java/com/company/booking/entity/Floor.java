@@ -1,6 +1,7 @@
 package com.company.booking.entity;
 
 import io.jmix.core.DeletePolicy;
+import io.jmix.core.FileRef;
 import io.jmix.core.entity.annotation.JmixGeneratedValue;
 import io.jmix.core.entity.annotation.OnDeleteInverse;
 import io.jmix.core.metamodel.annotation.Composition;
@@ -44,6 +45,9 @@ public class Floor {
     @NotNull
     @Column(name = "NAME", nullable = false, length = 100)
     private String name;
+
+    @Column(name = "PLAN", length = 1024)
+    private FileRef plan;
 
     @Composition
     @OneToMany(mappedBy = "floor")
@@ -91,6 +95,14 @@ public class Floor {
 
     public void setName(final String name) {
         this.name = name;
+    }
+
+    public FileRef getPlan() {
+        return plan;
+    }
+
+    public void setPlan(final FileRef plan) {
+        this.plan = plan;
     }
 
     public List<Room> getRooms() {

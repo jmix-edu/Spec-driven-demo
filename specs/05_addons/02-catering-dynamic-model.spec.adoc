@@ -1,0 +1,184 @@
+= 05.02 — Catering orders with Dynamic Model
+:toc: macro
+:status: approved
+
+toc::[]
+
+== Goal
+
+Employees can order catering for a booking: how many persons, which menu, a comment.
+The entity, its list and detail views, the menu item and the access rules are defined
+*entirely in the Dynamic Model* — no Java, no XML descriptors, no Liquibase changelog
+for the entity. The deliverable is a model YAML that the admin pastes into the Dynamic
+Model editor; it lives next to this spec as `02-catering-dynamic-model.yaml`.
+
+== What the add-on is (as found, not assumed)
+
+Read from `io.jmix.dynmodel:*:3.0.3` (core sources jar) and the UI module sources, the
+versions the Jmix 3.0.3 BOM pins.
+
+[cols="2,5"]
+|===
+|Install
+|Premium add-on. `build.gradle` already has `jmix-dynmodel-starter`,
+ `jmix-dynmodel-flowui-starter` and the premium repository (credentials from
+ `premiumRepoUser` / `premiumRepoPass`).
+
+|Where the model lives
+|In the database, table `DYNMOD_SETTINGS`, created by the add-on's changelog
+ `/io/jmix/dynmodel/liquibase/changelog.xml`. Entity tables are created at runtime when
+ the model is applied, prefixed `DYN_` (`jmix.dynmodel.dynamic-entity-table-prefix`);
+ Studio ignores them.
+
+|Editor
+|View `dynmod_Settings` (menu "Dynamic model"). Applying a model requires the specific
+ permission `DynmodApplyAccessContext` — in practice the admin.
+
+|YAML shape
+|Root `model:` → `enumerations`, `entities`. Entity: `name`, `attributes`,
+ `uniqueConstraints`, `views`, `resourceRoles`, `validation`, `messages`. Attribute:
+ `name` and *exactly one* of `javaClass` / `entityName` / `enumeration`; `length`,
+ `required`, `unique`, `instanceName`, `lob`, `collection`, `validation`,
+ `resourceRoles`, `messages`. View: `type` (`list`/`detail`), `viewId`, `viewRoute`,
+ `viewTitle`, `resourceRoles`, `menuItem` (`parentMenu`, `insertBefore`, `title`,
+ `resourceRoles`), `descriptor` (`template`, default `default`).
+
+|Defaults
+|View ids `<Entity>.list` / `<Entity>.detail`; route derived from the view id; template
+ `default`.
+
+|References to JPA entities
+|Supported — a dynamic attribute with `entityName: Booking` references the static entity
+ (key kept in a side table).
+
+|Access
+|Declared *in the YAML* by role code: entity `resourceRoles.read/create/update/delete`,
+ attribute `resourceRoles.view/modify`, view and menu-item `resourceRoles`.
+ `system-full-access` always gets everything
+ (`jmix.dynmodel.security.full-access-roles`). An unknown role code is only a warning.
+ *An attribute without its own `resourceRoles` grants nothing to other roles* — every
+ attribute must list `view` and `modify`, or create forms are empty for non-admins.
+|===
+
+== The entity: `CateringOrder`
+
+[cols="2,3,1,4"]
+|===
+|Attribute |Type |Required |Notes
+
+|`booking` |reference to `Booking` (`entityName`) |yes |the booking the catering is for
+|`persons` |`java.lang.Integer` |yes |validation `Positive` and `Max 50`
+|`menu` |dynamic enumeration `CateringMenu` |yes |instance name
+|`comment` |`java.lang.String`, length 1000 |no |dietary needs, delivery time
+|===
+
+Captions (`en`) for the entity, the attributes and the enumeration values are part of the
+YAML (`messages`).
+
+`CateringMenu` values: `COFFEE_BREAK` — Coffee break, `BREAKFAST` —
+Breakfast, `LUNCH` — Lunch, `BUFFET` — Buffet.
+
+== Views and menu
+
+[cols="1,2,3"]
+|===
+|Type |View id / route |Notes
+
+|list |`CateringOrder.list` / default route |template `default`; menu item "Catering orders"
+ in the `application` menu, inserted after Bookings
+|detail |`CateringOrder.detail` / default route |template `default`; the `booking` field
+ picks a booking through `Booking.list` (both personas already may open it)
+|===
+
+== Access
+
+[cols="2,2,2,2,2"]
+|===
+| |read |create |update |delete
+
+|`booking-employee` |✓ |✓ |— |—
+|`booking-office-manager` |✓ |✓ |✓ |✓
+|`system-full-access` |✓ (implicit) |✓ |✓ |✓
+|===
+
+* Attributes: `view` and `modify` for both roles on all four attributes (create ⇒ modify;
+  without `update` an employee's existing order still opens read-only).
+* Views `CateringOrder.list`, `CateringOrder.detail` and the menu item: both roles.
+* Picking a booking: an employee's `Booking.list` shows only their own bookings
+  (`booking-own-bookings`), so they can order catering only for their own bookings.
+* *Visibility of catering orders* (accepted): the Dynamic Model has no row-level policies, and
+  this lesson allows no application code, so an employee reads *all* catering orders,
+  including those for colleagues' bookings.
+
+== Required install fix (not application code)
+
+The root `changelog.xml` must include the add-on's changelog — the Studio install added
+the AI Tools include but not this one, and the starter does not register it itself:
+
+[source,xml]
+----
+<include file="/io/jmix/dynmodel/liquibase/changelog.xml"/>
+----
+
+Without it `DYNMOD_SETTINGS` is never created and the model cannot be stored. Added by the
+author.
+
+== Scope
+
+=== In scope
+
+* `02-catering-dynamic-model.yaml`: enumeration, entity, two views, menu item, access.
+* The changelog include above.
+
+=== Out of scope
+
+* Any Java, view XML or Liquibase changelog for `CateringOrder`.
+* Row-level restrictions on catering orders — would need code.
+* Business rules: catering only for confirmed bookings, cut-off times, persons ≤ room
+  capacity, prices, notifications to a caterer.
+* Showing catering on the booking screens (Lesson 1 screens unchanged).
+* Versioning the applied model: the model is stored in the database; the YAML file in
+  git is the source to re-apply after a database is recreated.
+* Production rollout of the model (Lesson 4).
+
+== Verification
+
+The model is runtime data, not code, so tests cannot apply it (and this lesson writes no
+code):
+
+* *Gate 1*: the YAML is checked against the 3.0.3 model records (field names, exactly one
+  type per attribute, role codes that exist, view ids matching `Booking.list`) — a
+  mechanical check, no IDE inspection applies to it.
+* *Gate 2*: `./gradlew --no-daemon clean test` green with the changelog include — proves
+  the add-on and its table come up; it does not exercise the model.
+* *Gate 3* (you): the checklist below is the real verification.
+
+=== Browser checklist (Gate 3)
+
+. Fresh or existing dev DB, app started. As *admin*: Dynamic model → paste the YAML →
+  apply → no errors. Menu shows "Catering orders" after Bookings.
+. *emma*: Catering orders → create: the booking picker shows only her bookings; set
+  persons, menu, comment → save. Opening it again: read-only, no Remove.
+. *emma*: persons `0` or `51` → validation error.
+. *oliver*: sees emma's catering order in the list (accepted); cannot edit or remove
+  it.
+. *maria*: creates, edits and removes a catering order; the booking picker shows all
+  bookings.
+. Restart the app → the model and the data survive.
+
+== Acceptance criteria
+
+. `02-catering-dynamic-model.yaml` applies without errors in the Dynamic Model editor.
+. The entity, enumeration, both views and the menu item exist after applying; captions
+  are shown, not keys.
+. Access matches the table above for emma, oliver, maria and admin.
+. No Java, descriptor or entity changelog was added; the only file change outside
+  `specs/` is the changelog include.
+. Gate 2 green.
+
+== Decisions
+
+. `menu` is the dynamic enumeration `CateringMenu` (Coffee break, Breakfast, Lunch, Buffet).
+. Employees read all catering orders — accepted for this lesson.
+. The changelog include was added by the author.
+. `persons`: `Positive` and `Max 50`.

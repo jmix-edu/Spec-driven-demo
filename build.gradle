@@ -19,9 +19,25 @@ repositories {
     maven {
         url = 'https://global.repo.jmix.io/repository/public'
     }
+    maven {
+        url = 'https://global.repo.jmix.io/repository/premium'
+        credentials {
+            username = rootProject['premiumRepoUser']
+            password = rootProject['premiumRepoPass']
+        }
+    }
 }
 
 dependencies {
+    implementation 'io.jmix.dynmodel:jmix-dynmodel-flowui-starter'
+    implementation 'io.jmix.dynmodel:jmix-dynmodel-starter'
+
+    implementation 'io.jmix.aitools:jmix-aitools-flowui-data-starter'
+    implementation 'io.jmix.aitools:jmix-aitools-flowui-starter'
+    implementation 'io.jmix.aitools:jmix-aitools-starter'
+    // model provider for AI Tools: OpenRouter through its OpenAI-compatible API
+    implementation 'org.springframework.ai:spring-ai-starter-model-openai'
+
     implementation 'io.jmix.core:jmix-core-starter'
     implementation 'io.jmix.data:jmix-eclipselink-starter'
     implementation 'io.jmix.security:jmix-security-starter'
@@ -38,6 +54,8 @@ dependencies {
     implementation 'com.vaadin:vaadin-dev'
 
     runtimeOnly 'org.hsqldb:hsqldb'
+    // prod profile database
+    runtimeOnly 'org.postgresql:postgresql'
 
     testImplementation('org.springframework.boot:spring-boot-starter-test') {
         exclude group: 'org.junit.vintage', module: 'junit-vintage-engine'
@@ -49,6 +67,14 @@ configurations.implementation {
     exclude group: 'com.vaadin', module: 'hilla'
     exclude group: 'com.vaadin', module: 'hilla-dev'
     exclude group: 'com.vaadin', module: 'copilot'
+}
+
+// production build (-Pvaadin.productionMode=true bootJar): keep the Vaadin dev tooling out of the JAR;
+// development builds are unaffected
+if (project.findProperty('vaadin.productionMode') == 'true') {
+    configurations.implementation {
+        exclude group: 'com.vaadin', module: 'vaadin-dev'
+    }
 }
 
 test {

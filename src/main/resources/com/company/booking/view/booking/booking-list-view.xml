@@ -8,6 +8,8 @@
                     class="com.company.booking.entity.Booking">
             <fetchPlan extends="_base">
                 <property name="user" fetchPlan="_instance_name"/>
+                <property name="room" fetchPlan="_instance_name"/>
+                <property name="desk" fetchPlan="_instance_name"/>
             </fetchPlan>
             <loader id="bookingsDl" readOnly="true">
                 <query>

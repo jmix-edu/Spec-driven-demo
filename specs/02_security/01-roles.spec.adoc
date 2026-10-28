@@ -1,0 +1,264 @@
+= 02.01 — Roles and access control
+:toc: macro
+:status: approved
+
+toc::[]
+
+== Goal
+
+Three personas get exactly the access their work needs:
+
+* *Employee* — sees the reference data only to pick a room or desk in the booking form;
+  creates and manages *their own* bookings.
+* *Office Manager* — manages the space (CRUD on Building, Floor, Room, Desk, Amenity);
+  sees *all* bookings read-only.
+* *Admin* — full access through the built-in `system-full-access` (unchanged).
+
+Access is enforced by Jmix resource roles (what a user may do) and one row-level role
+(which bookings a user may see and touch).
+
+== Roles
+
+[cols="2,2,1,4"]
+|===
+|Role (Java interface) |Code |Kind |Assigned to
+
+|`EmployeeRole` |`booking-employee` |resource |Employee
+|`OwnBookingsRole` |`booking-own-bookings` |row-level |Employee
+|`OfficeManagerRole` |`booking-office-manager` |resource |Office Manager
+|`FullAccessRole` (exists) |`system-full-access` |resource |Admin — no change
+|`UiMinimalRole` (exists) |`ui-minimal` |resource |not assigned separately: `EmployeeRole` and
+ `OfficeManagerRole` extend it, so each persona holds `ui.loginToUi`
+|===
+
+All in `com.company.booking.security`. Roles are assigned at runtime by the admin
+(Users → Role assignments); the demo seeder also creates three demo users with their
+assignments (see "Demo users").
+
+== EmployeeRole — `booking-employee`
+
+=== Entity and attribute policies
+
+[cols="2,3,4"]
+|===
+|Entity |Entity actions |Attribute policies
+
+|Booking
+|`READ`, `CREATE`, `UPDATE`, `DELETE`
+|`MODIFY`: `room`, `desk`, `startTime`, `endTime`, `status`, `purpose` +
+ `VIEW`: `user`
+
+|Building, Floor, Room, Desk, Amenity
+|`READ`
+|`VIEW`: `*`
+
+|User
+|`READ`
+|`VIEW`: `username`, `firstName`, `lastName` (what the user's instance name shows)
+|===
+
+Notes:
+
+* *CREATE ⇒ MODIFY* holds: every editable Booking field is `MODIFY`. `user` is
+  deliberately `VIEW`: the form prefills it with the current user (Lesson 1
+  `BookingDetailView`) and the employee cannot change it. The two policies must list
+  attributes explicitly — `MODIFY` on `*` would win over `VIEW` on `user`, because
+  resource roles are additive and have no deny.
+* Attribute policies are enforced by the UI, not by `DataManager`. The guarantee that an
+  employee cannot book *for someone else* comes from the row-level role below, not from
+  `VIEW` on `user`.
+* "All operations on own bookings" — including setting `status` to `CANCELLED`.
+  Which status transitions are allowed is out of scope.
+
+=== View and menu policies
+
+[cols="2,4"]
+|===
+|Views |`Booking.list`, `Booking.detail`, `Room.lookup`, `Desk.lookup`
+|Menu |`Booking.list`
+|===
+
+No `User.list`: the employee cannot open the user picker's lookup, so the `user` field
+offers no way to choose another user. No Building / Amenity screens.
+
+== OwnBookingsRole — `booking-own-bookings` (row-level)
+
+[cols="2,3,4"]
+|===
+|Policy |Applies to |Condition
+
+|`@JpqlRowLevelPolicy`
+|reading `Booking` (lists, lookups, `DataManager` loads)
+|`{E}.user.username = :current_user_username`
+
+|`@PredicateRowLevelPolicy`
+|`CREATE`, `UPDATE`, `DELETE` of `Booking`
+|the booking's `user` is the current user
+|===
+
+Notes:
+
+* The predicate is about *ownership only*. Per the toolkit, an UPDATE predicate is
+  evaluated against the new state being saved; ownership is what must not change, so
+  this is the right fit. Status rules stay out of it.
+* Row-level policies are joined with `AND`. Assign this role to employees only — an
+  Office Manager who also had it would see only their own bookings.
+* `Booking` is never loaded as a collection of another entity, so the JPQL policy alone
+  covers reads (no in-memory predicate needed for READ).
+
+== OfficeManagerRole — `booking-office-manager`
+
+=== Entity and attribute policies
+
+[cols="2,3,4"]
+|===
+|Entity |Entity actions |Attribute policies
+
+|Building, Floor, Room, Desk, Amenity
+|`ALL`
+|`MODIFY`: `*`
+
+|Booking
+|`READ`
+|`VIEW`: `*`
+
+|User
+|`READ`
+|`VIEW`: `username`, `firstName`, `lastName`
+|===
+
+=== View and menu policies
+
+[cols="2,4"]
+|===
+|Views
+|`Building.list`, `Building.detail`, `Floor.detail`, `Room.detail`, `Desk.detail`,
+ `Amenity.list`, `Amenity.detail`, `Booking.list`, `Booking.detail`
+
+|Menu
+|`Building.list`, `Amenity.list`, `Booking.list`
+|===
+
+Notes:
+
+* `Floor.detail`, `Room.detail`, `Desk.detail` are dialog-only composition views — they
+  need a view policy and no menu policy. `Amenity.list` doubles as the lookup of the
+  amenities grid in `Room.detail`.
+* Bookings are read-only: without `CREATE`/`UPDATE`/`DELETE` the list's create and remove
+  are unavailable and edit opens the detail view read-only (standard Jmix action
+  behaviour; confirmed at implementation).
+
+== Required change to Lesson 1 code: the slot-conflict query
+
+`BookingValidationService` (Lesson 1, spec 01_foundations/03) looks for overlapping
+bookings with the *user's* `DataManager`. Under `booking-own-bookings` that query sees
+only the employee's own bookings, so *a collision with a colleague's booking would not
+be detected* — rule R3 would silently stop working for employees.
+
+Change: the conflict query (and only it) runs through
+`dataManager.unconstrained()`. It returns only the earliest conflicting booking's start
+and end, which the message already shows; no other data of the colleague's booking is
+exposed. Everything else in the service stays as it is. This is the only Lesson 1 code
+this spec touches.
+
+== Demo users
+
+The Lesson 1 demo-data seeder (`DemoDataService.seedIfEmpty()`) additionally creates,
+in the same save and under the same "empty database" condition:
+
+[cols="1,1,3"]
+|===
+|Username |Password |Role assignments
+
+|`emma` |`emma` |`booking-employee`, `booking-own-bookings`
+|`oliver` |`oliver` |`booking-employee`, `booking-own-bookings`
+|`maria` |`maria` |`booking-office-manager`
+|===
+
+Passwords are encoded with the application's `PasswordEncoder`. These are demo
+credentials for a fresh development database only (like `admin`/`admin`); they are
+never created on a non-empty database.
+
+== Tests
+
+Security is "hard to check by hand" (CLAUDE.md) → integration tests,
+`SecurityRolesTest`. Each test creates its own users and role assignments through
+`DataManager`, runs the operation as that user with `SystemAuthenticator.withUser(...)`,
+and removes everything in `@AfterEach`.
+
+Employee (`booking-employee` + `booking-own-bookings`):
+
+. Loading bookings returns only their own, not a colleague's.
+. Creating a booking for themselves → saved.
+. Creating a booking whose `user` is a colleague → rejected (access denied).
+. Updating and deleting a colleague's booking → rejected; their own → allowed.
+. Creating a `Building` → rejected.
+. Booking a room that a *colleague* has booked for an overlapping time → rejected with the
+  slot-conflict message (proves the unconstrained conflict query).
+
+Office Manager (`booking-office-manager`):
+
+. Creating and deleting a `Building` with a floor, room and desk → allowed.
+. Loading bookings returns everyone's.
+. Creating or updating a `Booking` → rejected.
+
+View and menu policies are checked in the browser (Gate 3), not in tests.
+
+== Scope
+
+=== In scope
+
+* `EmployeeRole`, `OwnBookingsRole`, `OfficeManagerRole` as above.
+* The unconstrained conflict query in `BookingValidationService`.
+* `SecurityRolesTest`.
+
+=== Out of scope
+
+* LDAP, SSO, OAuth/OIDC, any external identity provider; password policies.
+* Changes to the data model and to the screens from Lesson 1 (no new attributes,
+  views, buttons or menu items; no hiding of fields beyond what attribute policies do).
+* Status transition rules (who may set `COMPLETED`), approval workflows.
+* Row-level restrictions on `User` (an employee could still read other users' names
+  through `DataManager`; no screen exposes them).
+* REST/API scope roles; the roles are written for the UI and the data layer.
+* Deleting reference data that has bookings — still the Lesson 1 FK error.
+
+== Who does what
+
+All hand-written by me: the three role interfaces, the one-line change in
+`BookingValidationService`, the demo users in `DemoDataService`, the tests. No Studio artifacts; no changelog (role
+assignments are runtime data).
+
+== Acceptance criteria
+
+. The three roles exist with exactly the policies above; `system-full-access` is
+  unchanged.
+. Mechanical role checks (toolkit): every entity with `CREATE` has `MODIFY` on its
+  editable attributes; every `@MenuPolicy` id is an `<item view="…">` in `menu.xml`;
+  every view an Office Manager or Employee can reach has a `@ViewPolicy`, dialog views
+  included; Employee and Office Manager can log in (`ui.loginToUi`).
+. All tests from "Tests" pass, and pass again on a second back-to-back run.
+. Lesson 1 tests (`BookingValidationTest`, `DemoDataServiceTest`, seed tests) still pass.
+. Gate 1: compile + JetBrains inspection on every Java file touched.
+. Gate 2: `./gradlew --no-daemon clean test` green.
+
+=== Browser checklist (Gate 3)
+
+Recreate the dev database, start the app; the seeder creates `emma`, `oliver` (Employee)
+and `maria` (Office Manager), passwords = usernames.
+
+. *emma*: menu shows only Bookings. Create a booking — user is emma and not editable;
+  the room picker opens and lists rooms with floor and building. Save.
+. *oliver*: Bookings shows none of emma's. Booking emma's room for an overlapping time →
+  "Room … is already booked…".
+. *emma*: edit and cancel her own booking → works.
+. *maria*: menu shows Buildings, Amenities, Bookings. Create a floor with a room and a desk
+  inside a building, add an amenity to the room → works. Bookings shows emma's and
+  oliver's; no Create/Remove; opening one shows a read-only form.
+. *admin*: everything as before.
+
+== Decisions
+
+. Demo users `emma`, `oliver`, `maria` with role assignments are seeded by the demo-data
+  seeder.
+. `EmployeeRole` and `OfficeManagerRole` extend `UiMinimalRole`.

@@ -170,9 +170,15 @@ No soft delete, so Jmix `@OnDelete` policies do not run; rules live in foreign k
 * Booking → Room / Desk / User: deny. Plain FK; deleting a room, desk or user that has
   bookings fails with a database error. Consequence: a building/floor with booked
   rooms or desks cannot be deleted either.
-* Room ↔ Amenity: link rows go away with the room — FK `ROOM_AMENITY_LINK.ROOM_ID`
-  has `onDelete="CASCADE"` (needed because a room deleted by the floor cascade bypasses
-  JPA). Deleting an amenity still linked to rooms is denied: plain FK on `AMENITY_ID`.
+* Room ↔ Amenity: both FKs of `ROOM_AMENITY_LINK` are plain, exactly as Studio
+  generates them. Deleting a single room through JPA removes its link rows (owning side).
+  Deleting a floor or building whose rooms have amenities is denied: the floor cascade
+  deletes rooms in the database, bypassing JPA, and the link rows block it. Unlink the
+  amenities first. Deleting an amenity still linked to rooms is denied too.
++
+A DB-level cascade on the join table is deliberately not used: nothing in the entity
+model expresses it (Studio ignores EclipseLink `@CascadeOnDelete`), so every Studio
+diff would revert it.
 
 == Indexes
 
@@ -190,7 +196,7 @@ future slot checks and lists will filter by time.
 
 |Entities and enum (`com.company.booking.entity`) |me
 |Message keys in `messages_en.properties` |me
-|Liquibase changelog `020-data-model.xml` |you, in Jmix Studio; I review it against this spec
+|Liquibase changelog (Studio's dated file under `changelog/`) |you, in Jmix Studio; I review it against this spec
 |Gate 1 (API + static checks on my files) |me
 |Gate 2 (`./gradlew clean test`, foreground) |me, after your changelog is in place
 |===
@@ -224,4 +230,5 @@ reviewing the changelog. If you want it pinned by an integration test, say so.
 . Time type: `OffsetDateTime`.
 . Room/desk and start/end invariants: not now.
 . Deleting an amenity in use: denied by the FK.
+. Floor/building with rooms that have amenities: deletion denied, no cascade on the join table.
 . Statuses: `CONFIRMED / CANCELLED / COMPLETED`.

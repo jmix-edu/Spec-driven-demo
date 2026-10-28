@@ -1,0 +1,44 @@
+# Booking application with PostgreSQL (spec 04_deployment/01).
+# Build the JAR first:  ./gradlew -Pvaadin.productionMode=true bootJar
+# Values come from .env (copy .env.example) or the shell; a missing one stops "up" with a message.
+# Do not run "docker compose config": it prints the secrets.
+name: booking
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: booking
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - booking-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d booking"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build: .
+    image: booking-app:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://db:5432/booking
+      DB_USER: ${DB_USER:?set DB_USER in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY in .env}
+      JAVA_OPTS: ${JAVA_OPTS:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - booking-app-work:/app/.jmix/work
+
+volumes:
+  booking-db-data:
+    name: booking-db-data
+  booking-app-work:
+    name: booking-app-work

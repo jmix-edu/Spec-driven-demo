@@ -1,0 +1,51 @@
+= 04 Deployment: prompts
+
+The prompts used in this lesson, in order, cleaned up so they can be replayed as-is.
+Where a prompt was changed to avoid a dead end, the note under it says why.
+
+== 1. Preparing for deployment
+
+=== 1.1 Spec
+
+[source,text]
+----
+Write a spec specs/04_deployment/01-deployment.spec.adoc for preparing our booking app for
+deployment with Spring Boot. We need:
+- application name and externalized properties (secrets via env vars, not in code/image);
+- runtime profiles: dev by default (embedded HSQLDB + demo data), prod for deployment
+  (datasource via env vars, PostgreSQL, quieter logs, no demo data). Keep the dev datasource
+  in application.properties - Jmix Studio reads the connection from there - and override it
+  in the prod profile;
+- a profile-specific bean: the existing demo data seeder gets @Profile("dev") - seed demo
+  data only in dev;
+- building an executable fat JAR - keep Studio's `vaadin { productionMode = false }`, the
+  production build is `-Pvaadin.productionMode=true bootJar`; the WAR format - by explanation;
+- containerization: Dockerfile + docker-compose.
+Explicitly write out what is out of scope (external DB/clustering/replication - the advanced
+course) and the acceptance criteria.
+----
+
+NOTE: The sentence about the dev datasource was added after the original session. Moving
+`main.datasource.*` into `application-dev.properties` stopped Studio from generating
+changelogs: Studio reads `application.properties` without applying profiles.
+
+=== 1.2 Decisions and implementation
+
+[source,text]
+----
+1 - build the JAR on the host, the image only copies it; 2 - demo data strictly dev-only;
+3 - document "change the admin password at first login"; 4 - no Actuator. Implement.
+----
+
+Result: shared/dev/prod properties, `@Profile("dev")` on the startup seeder, the PostgreSQL
+driver, `vaadin-dev` excluded from production builds only, `Dockerfile` (non-root),
+`docker-compose.yaml`, `.env.example`, and a README section. The smoke test runs against
+PostgreSQL and is torn down by name afterwards.
+
+[source,text]
+----
+Accept "fails fast at startup" for a missing DB_URL and update the criterion.
+----
+
+NOTE: Spring keeps an unresolved `${DB_URL}` as literal text, so the error is the
+datasource's own and does not name the variable. Compose names its variables itself.

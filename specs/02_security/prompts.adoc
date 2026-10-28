@@ -1,0 +1,42 @@
+= 02 Security: prompts
+
+The prompts used in this lesson, in order, cleaned up so they can be replayed as-is.
+Dead ends from the original session are left out.
+
+== 1. Roles
+
+=== 1.1 Spec
+
+[source,text]
+----
+Write the spec specs/02_security/01-roles.spec.adoc for access control in our booking
+application. Three personas:
+- Employee: sees the reference data (Building/Floor/Room/Desk/Amenity) to pick in the form,
+  creates and manages THEIR OWN bookings;
+- Office Manager: CRUD on the reference data (manages the space), sees ALL bookings read-only;
+- Admin: full access, we use the built-in system-full-access.
+
+Describe the resource roles (entity/attribute/view/menu policies) and a separate row-level
+role "only own bookings". Explicitly write out what is out of scope (LDAP/SSO, changes to
+the model and screens from Lesson 1) and the acceptance criteria.
+----
+
+Result: the spec, including one required change to Lesson 1 code. The slot-conflict
+query must run unconstrained, otherwise "own bookings only" hides colleagues' bookings
+from the overlap check.
+
+=== 1.2 Decisions and implementation
+
+[source,text]
+----
+1 - seed the demo users emma, oliver (Employee) and maria (Office Manager), I will recreate
+the database; 2 - the persona roles extend UiMinimalRole. Implement.
+----
+
+Result: `EmployeeRole`, `OfficeManagerRole` (both extend `UiMinimalRole`), `OwnBookingsRole`
+(JPQL for reads, a predicate for create/update/delete), demo users in the seeder, and
+`SecurityRolesTest`: 10 tests running as real users with real role assignments.
+
+NOTE: Before `clean test`, the agent checks that the app is not running from the IDE. A
+pattern like `pgrep -f 'com.company...'` matches the checking shell itself. Use
+`pgrep -f '[c]om\.company\.booking\.BookingApplication'`.

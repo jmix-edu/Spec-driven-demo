@@ -1,0 +1,200 @@
+= 05.01 — AI Tools add-on: chat via OpenRouter
+:toc: macro
+:status: approved
+
+toc::[]
+
+== Goal
+
+Employees and office managers get an AI chat inside the application. The chat is the
+Jmix *AI Tools* add-on; the model is `z-ai/glm-5.2` on OpenRouter, reached through
+OpenRouter's OpenAI-compatible API. The API key comes from the `OPENROUTER_API_KEY`
+environment variable. This lesson covers *local runs only*; production settings,
+compose and deployment are Lesson 4.
+
+== What the add-on is (as found, not assumed)
+
+Read from the Jmix 3.0.3 BOM and the add-on jars. The BOM pins
+`io.jmix.aitools:*:3.0.3` and Spring AI `2.0.0`. The first draft was read from 3.0.2;
+everything below was re-verified against 3.0.3 after installation.
+
+[cols="2,5"]
+|===
+|Artifact to add |`io.jmix.aitools:jmix-aitools-flowui-data-starter` (pulls the core and
+ UI modules; version from the Jmix BOM)
+
+|Model provider
+|*None included.* The add-on depends only on Spring AI's generic
+ `spring-ai-client-chat` / `spring-ai-model`. An OpenAI-compatible Spring AI model
+ starter must be added (version from the `spring-ai-bom` the Jmix BOM imports).
+
+|Screens
+|`aitls_AiChatHubView` (menu item in the add-on's own `aitls` menu) and the chat view.
+
+|Role shipped
+|`AiToolsChatUserRole` (`aitools-chat-user`, scope UI): chat entities, the two chat
+ views, the `aitls_AiChatHubView` menu item.
+
+|Data
+|Tables `AITLS_AI_CONVERSATION_ENTITY`, `AITLS_AI_CHAT_MESSAGE_ENTITY`, changelog
+ `/io/jmix/aitoolsflowuidata/liquibase/changelog.xml`. Conversations carry a
+ `USERNAME` column.
+
+|Data-load feature
+|On by default (`jmix.aitools.dataload.enabled=true`): the model may generate and run
+ JPQL over application entities. Execution uses the *secured* `DataManager` and
+ `AccessManager` (`JpqlExecutionService`); no unconstrained or system-authenticated
+ path was found in the add-on.
+|===
+
+== Design
+
+=== Dependencies (`build.gradle`)
+
+* `io.jmix.aitools:jmix-aitools-flowui-data-starter`
+* `org.springframework.ai:spring-ai-starter-model-openai` — artifact id read from
+  `spring-ai-bom` 2.0.0.
+
+No versions written: both come from the BOMs.
+
+=== Database
+
+The add-on's changelog is added to the root `changelog.xml` with an explicit
+`<include file="/io/jmix/aitoolsflowuidata/liquibase/changelog.xml"/>` — `includeAll`
+does not reach changelogs inside add-on jars (toolkit rule). No application changelog.
+
+=== Configuration (`application.properties`)
+
+Property names from the Spring AI 2.0.0 configuration metadata (2.0 differs from 1.x:
+the model is `spring.ai.openai.chat.model`, and the client is the official OpenAI Java
+SDK, whose base URL *includes* `/v1` — its default is `https://api.openai.com/v1`):
+
+[cols="3,3"]
+|===
+|`spring.ai.openai.base-url` |`https://openrouter.ai/api/v1`
+|`spring.ai.openai.api-key` |`${OPENROUTER_API_KEY}` — never a value in any file; without
+ the variable the app does not start ("Could not resolve placeholder"), which is the
+ intended local fail-fast
+|`spring.ai.openai.chat.model` |`z-ai/glm-5.2`
+|`jmix.aitools.dataload.exclude-entities` |`User` (see "Data access through the chat")
+|===
+
+These are the only lines added to `application.properties`. Nothing else in it changes;
+no profile, compose or deployment file is touched.
+
+=== Tests must not need the key
+
+`src/test/resources/application-test.properties` gets a placeholder API key
+(`test-placeholder`) so the context starts without `OPENROUTER_API_KEY`, and
+`jmix.aitools.dataload.max-repair-attempts=0` so an invalid query in a test is never
+sent to the model for "repair". No test calls the model; one that reached OpenRouter
+would fail on the placeholder, which is the intent.
+
+=== Access: who gets the chat
+
+`EmployeeRole` and `OfficeManagerRole` extend `AiToolsChatUserRole` — the same pattern
+as `UiMinimalRole` in spec 02_security/01: one assignment per persona, nothing to
+forget, and the demo users get the chat with no seed change. Admin already has
+everything through `system-full-access`.
+
+=== Data access through the chat
+
+The chat can answer questions from application data (data-load). Rules:
+
+* *Same rights as the screens.* A query runs with the chatting user's roles: emma
+  (Employee + "own bookings") can get her bookings and the reference data, never
+  oliver's bookings; maria (Office Manager) can read all bookings. This is an
+  acceptance criterion with a test (below). *If it does not hold, data-load is switched
+  off* (`jmix.aitools.dataload.enabled=false`) and the chat ships without data access.
+* *No personal data to the provider.* `User` is excluded from the model exposed to the
+  AI. `io.jmix.*` entities and system-level attributes are already excluded by the
+  add-on's defaults.
+* Everything else the chat answers from — entity structure and query results for
+  Building, Floor, Room, Desk, Amenity, Booking — is sent to OpenRouter. Acceptable for
+  local runs on demo data; not a production decision.
+
+== Tests
+
+`AiChatDataAccessTest` — integration, no LLM involved: calls the add-on's JPQL
+execution service directly (`JpqlExecutionService.execute(JpqlExecutionRequest)`, the
+step that runs the model's generated query and applies the user's access constraints)
+with a query for all bookings of a test building:
+
+. As an Employee (with "own bookings") → only their own bookings.
+. As an Office Manager → all bookings.
+. A query on `User` → rejected / not available (excluded entity).
+
+Users, role assignments and data created and cleaned up as in `SecurityRolesTest`.
+The UI chat path (background task, live model) is covered by the browser checklist.
+
+== Scope
+
+=== In scope
+
+* Add-on and Spring AI OpenAI starter dependencies; root changelog include.
+* OpenRouter configuration in `application.properties`, key from the environment.
+* Placeholder key in the test profile.
+* `EmployeeRole`, `OfficeManagerRole` extend `AiToolsChatUserRole`.
+* `User` excluded from data-load; `AiChatDataAccessTest`.
+
+=== Out of scope
+
+* Production: production profile/settings, Docker, compose, deployment, secret storage
+  (Lesson 4).
+* Other providers or models, model switching in the UI, fallback models.
+* Custom AI tools/functions, RAG, vector stores, document upload to the chat.
+* Prompt customization, chat UI styling, menu placement of the add-on's `aitls` menu.
+* Cost control, rate limits, usage quotas.
+* Changes to the Lesson 1 model and screens; role changes beyond the two `extends`.
+* Data-protection review of sending booking data to an external provider beyond the
+  `User` exclusion.
+
+== Who does what
+
+[cols="3,2"]
+|===
+|Step |Who
+
+|Set `OPENROUTER_API_KEY` in the IntelliJ run configuration (and shell) |you
+|Dependencies, changelog include, properties, test placeholder, role `extends`,
+ `User` exclusion, `AiChatDataAccessTest` |me — see Q1 for the add-on dependency itself
+|Gate 1, Gate 2 |me
+|Gate 3 (live chat) |you
+|===
+
+I check that `OPENROUTER_API_KEY` is set without printing it (CLAUDE.md: never print
+environment variables or secrets).
+
+== Acceptance criteria
+
+. The add-on and the OpenAI-compatible starter are on the classpath with BOM-managed
+  versions; the add-on's tables are created by Liquibase on a fresh database.
+. `application.properties` holds base URL, `${OPENROUTER_API_KEY}` and the model; no key
+  value appears in any file; no other configuration file outside `src/main/resources/
+  application.properties` and `src/test/resources/application-test.properties` changed.
+. Employee and Office Manager see the AI chat menu item and can open the chat; their
+  other permissions are unchanged (`SecurityRolesTest` still green).
+. `AiChatDataAccessTest` green: the chat's data access honours "own bookings".
+. Gate 1: compile + inspection on every Java file touched.
+. Gate 2: `./gradlew --no-daemon clean test` green *without* `OPENROUTER_API_KEY` set.
+
+=== Browser checklist (Gate 3)
+
+With `OPENROUTER_API_KEY` set in the run configuration, fresh dev DB, app started:
+
+. *emma*: the AI chat menu item is there; ask "Hello" → an answer arrives.
+. *emma*: ask "Which bookings do I have?" → only her bookings. Ask "Which bookings does
+  oliver have?" → none / no access, never his data.
+. *maria*: ask "How many bookings are there tomorrow?" → counts everyone's.
+. *oliver*: the chat list does not show emma's conversations.
+. Ask "List all users with their emails" → the chat cannot answer from data.
+. Start the app *without* `OPENROUTER_API_KEY`: note what happens (startup error or an
+  error on the first message) — expected and documented, not fixed in this lesson.
+
+== Decisions
+
+. The add-on was installed through Studio: the three AI Tools starters in
+  `build.gradle` and the root changelog include. Only the model provider is added by
+  hand.
+. Data-load on, with `User` excluded and the access test as a hard gate.
+. `z-ai/glm-5.2` supports tool calling (confirmed by the author).
